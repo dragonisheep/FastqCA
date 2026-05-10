@@ -8,12 +8,10 @@ Chunking strategy follows main_new.py defaults:
 import os
 import csv
 import time
-import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 from datetime import datetime
-from collections import defaultdict
 
 import psutil
 from Bio import SeqIO
@@ -23,6 +21,7 @@ INPUT_DIR = '/media/compress/新加卷1/New_Test'
 OUTPUT_DIR = '/media/compress/新加卷/output/New_Test_LossLess/Ablation_lpaq8_chunk'
 BLOCK_SIZE = 128 * 1024 * 1024  # 与原实验保持一致
 LPAQ8_PATH = str((Path(__file__).resolve().parent / 'lpaq8').resolve())
+COMPRESSION_LEVEL = '9'
 # ===========================
 
 
@@ -100,7 +99,7 @@ def split_fastq_to_chunks(input_fastq, chunk_dir, reads_per_block):
 
 def compress_chunk_with_lpaq8(chunk_path):
     out_path = f"{chunk_path}.lpaq8"
-    cmd = [LPAQ8_PATH, chunk_path, out_path]
+    cmd = [LPAQ8_PATH, COMPRESSION_LEVEL, chunk_path, out_path]
     process = subprocess.Popen(cmd)
     metrics = monitor_process(process)
     process.wait()
