@@ -28,6 +28,9 @@ BLOCK_SIZE = 128 * 1024 * 1024
 WORKERS = 4
 LPAQ8_PATH = str((Path(__file__).resolve().parent / 'lpaq8').resolve())
 COMPRESSION_LEVEL = '9'
+# multiprocessing.imap_unordered 的调度批大小（按“任务个数”），
+# 与上面的 BLOCK_SIZE(每块字节数)不同。为了消融实验可比性，固定为 1。
+POOL_TASK_CHUNKSIZE = 1
 # ===============
 
 MARKER = 1
@@ -198,8 +201,9 @@ def compress_file(in_fastq, out_dir):
     part_count = 0
     part_paths = {}
     with multiprocessing.Pool(processes=WORKERS) as pool:
-        # 流式派发 + 无序回收结果，减少主进程等待和调度开销
-        for part_path in pool.imap_unordered(worker_compress, iter_block_tasks(), chunksize=8):
+        # 注意：这里的 chunksize 是“每次分发多少个任务”，不是 FASTQ 块大小。
+        # FASTQ 块大小仍由 BLOCK_SIZE 控制（默认 128MB）。
+        for part_path in pool.imap_unordered(worker_compress, iter_block_tasks(), chunksize=POOL_TASK_CHUNKSIZE):
             part_count += 1
             idx = int(os.path.splitext(os.path.basename(part_path))[0].split('_')[1])
             part_paths[idx] = part_path
