@@ -182,23 +182,28 @@ def compress_file(in_fastq, out_dir):
     os.makedirs(temp_parts, exist_ok=True)
 
     rpb = reads_per_block_from_fastq(in_fastq, BLOCK_SIZE)
-    tasks, cur, idx = [], [], 1
-    for rec in iter_fastq_records_binary(in_fastq):
-        cur.append(rec)
-        if len(cur) >= rpb:
-            tasks.append((idx, cur, temp_parts))
-            idx += 1
-            cur = []
-    if cur:
-        tasks.append((idx, cur, temp_parts))
+
+    def iter_block_tasks():
+        cur, idx = [], 1
+        for rec in iter_fastq_records_binary(in_fastq):
+            cur.append(rec)
+            if len(cur) >= rpb:
+                yield (idx, cur, temp_parts)
+                idx += 1
+                cur = []
+        if cur:
+            yield (idx, cur, temp_parts)
 
     start = time.time()
+    part_count = 0
     with multiprocessing.Pool(processes=WORKERS) as pool:
-        parts = pool.map(worker_compress, tasks)
+        # 使用流式派发任务，避免一次性构建巨大的 tasks 列表导致内存/换页卡住
+        for _ in pool.imap(worker_compress, iter_block_tasks(), chunksize=1):
+            part_count += 1
 
     with open(out_path, 'wb') as out:
-        out.write(struct.pack('<I', len(parts)))
-        for i in range(1, len(parts)+1):
+        out.write(struct.pack('<I', part_count))
+        for i in range(1, part_count + 1):
             pth = os.path.join(temp_parts, f'chunk_{i}.part')
             out.write(open(pth, 'rb').read())
     shutil.rmtree(temp_parts, ignore_errors=True)
