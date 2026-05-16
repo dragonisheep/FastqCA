@@ -196,15 +196,18 @@ def compress_file(in_fastq, out_dir):
 
     start = time.time()
     part_count = 0
+    part_paths = {}
     with multiprocessing.Pool(processes=WORKERS) as pool:
-        # 使用流式派发任务，避免一次性构建巨大的 tasks 列表导致内存/换页卡住
-        for _ in pool.imap(worker_compress, iter_block_tasks(), chunksize=1):
+        # 流式派发 + 无序回收结果，减少主进程等待和调度开销
+        for part_path in pool.imap_unordered(worker_compress, iter_block_tasks(), chunksize=8):
             part_count += 1
+            idx = int(os.path.splitext(os.path.basename(part_path))[0].split('_')[1])
+            part_paths[idx] = part_path
 
     with open(out_path, 'wb') as out:
         out.write(struct.pack('<I', part_count))
         for i in range(1, part_count + 1):
-            pth = os.path.join(temp_parts, f'chunk_{i}.part')
+            pth = part_paths[i]
             out.write(open(pth, 'rb').read())
     shutil.rmtree(temp_parts, ignore_errors=True)
     return out_path, time.time() - start, rpb
