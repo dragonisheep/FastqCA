@@ -28,6 +28,9 @@ BLOCK_SIZE = 128 * 1024 * 1024
 WORKERS = 4
 LPAQ8_PATH = str((Path(__file__).resolve().parent / 'lpaq8').resolve())
 COMPRESSION_LEVEL = '9'
+# multiprocessing.imap_unordered 的调度批大小（按“任务个数”），
+# 与上面的 BLOCK_SIZE(每块字节数)不同。为了消融实验可比性，固定为 1。
+POOL_TASK_CHUNKSIZE = 1
 # ===============
 
 MARKER = 1
@@ -182,24 +185,33 @@ def compress_file(in_fastq, out_dir):
     os.makedirs(temp_parts, exist_ok=True)
 
     rpb = reads_per_block_from_fastq(in_fastq, BLOCK_SIZE)
-    tasks, cur, idx = [], [], 1
-    for rec in iter_fastq_records_binary(in_fastq):
-        cur.append(rec)
-        if len(cur) >= rpb:
-            tasks.append((idx, cur, temp_parts))
-            idx += 1
-            cur = []
-    if cur:
-        tasks.append((idx, cur, temp_parts))
+
+    def iter_block_tasks():
+        cur, idx = [], 1
+        for rec in iter_fastq_records_binary(in_fastq):
+            cur.append(rec)
+            if len(cur) >= rpb:
+                yield (idx, cur, temp_parts)
+                idx += 1
+                cur = []
+        if cur:
+            yield (idx, cur, temp_parts)
 
     start = time.time()
+    part_count = 0
+    part_paths = {}
     with multiprocessing.Pool(processes=WORKERS) as pool:
-        parts = pool.map(worker_compress, tasks)
+        # 注意：这里的 chunksize 是“每次分发多少个任务”，不是 FASTQ 块大小。
+        # FASTQ 块大小仍由 BLOCK_SIZE 控制（默认 128MB）。
+        for part_path in pool.imap_unordered(worker_compress, iter_block_tasks(), chunksize=POOL_TASK_CHUNKSIZE):
+            part_count += 1
+            idx = int(os.path.splitext(os.path.basename(part_path))[0].split('_')[1])
+            part_paths[idx] = part_path
 
     with open(out_path, 'wb') as out:
-        out.write(struct.pack('<I', len(parts)))
-        for i in range(1, len(parts)+1):
-            pth = os.path.join(temp_parts, f'chunk_{i}.part')
+        out.write(struct.pack('<I', part_count))
+        for i in range(1, part_count + 1):
+            pth = part_paths[i]
             out.write(open(pth, 'rb').read())
     shutil.rmtree(temp_parts, ignore_errors=True)
     return out_path, time.time() - start, rpb
