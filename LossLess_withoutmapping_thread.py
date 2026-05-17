@@ -55,7 +55,7 @@ def ca_predict_encode(rows, candidates):
 
 
 def encode_records(records):
-    seq_rows = [r.seq.encode('ascii') for r in records]
+    seq_rows = [str(r.seq).encode('ascii') for r in records]
     qual_rows = [r.letter_annotations['phred_quality'] for r in records]
     qual_rows = [bytes(q + 33 for q in row) for row in qual_rows]
 
